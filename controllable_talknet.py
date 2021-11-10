@@ -454,35 +454,21 @@ def generate_audio(
     pitch_options,
     pitch_factor,
     wav_name,
+    out_wav,
     f0s,
     f0s_wo_silence,
 ):
     global tnmodel, tnpath, tndurs, tnpitch, hifigan, h, denoiser, hifipath
 
     if transcript is None or transcript.strip() == "":
-        return [
-            None,
-            "No transcript entered",
-            playback_hide,
-            None,
-        ]
+        return (False, "No transcript entered")
     if wav_name is None and "dra" not in pitch_options:
-        return [
-            None,
-            "No reference audio selected",
-            playback_hide,
-            None,
-        ]
+        return (False, "No reference audio selected")
     load_error, talknet_path, hifigan_path = download_model(
         "Custom", custom_model
     )
     if load_error is not None:
-        return [
-            None,
-            load_error,
-            playback_hide,
-            None,
-        ]
+        return (False, load_error)
 
     try:
         with torch.no_grad():
@@ -517,12 +503,7 @@ def generate_audio(
 
             if "dra" in pitch_options:
                 if tndurs is None or tnpitch is None:
-                    return [
-                        None,
-                        "Model doesn't support pitch prediction",
-                        playback_hide,
-                        None,
-                    ]
+                    return (False, "Model doesn't support pitch prediction")
                 spect = tnmodel.generate_spectrogram(tokens=tokens)
             else:
                 durs = get_duration(wav_name, transcript, token_list)
@@ -622,15 +603,10 @@ def generate_audio(
             y_padded[: y_out.shape[0]] = y_out
             sr_mix = wave_out + y_padded
 
-            buffer = open(wav_name, "wb")
+            buffer = open(out_wav, "wb")
             wavfile.write(buffer, 32000, sr_mix.astype(np.int16))
             buffer.close()
 
-            return [arpa, playback_style]
+            return (True, arpa)
     except Exception:
-        return [
-            None,
-            str(traceback.format_exc()),
-            playback_hide,
-            None,
-        ]
+        return (False, str(traceback.format_exc()))
