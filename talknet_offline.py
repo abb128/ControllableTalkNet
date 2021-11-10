@@ -14,7 +14,7 @@ def handle_connection(connection, client_addr):
         print("Received an invalid request")
         return False
     
-    (transcript, output_path, custom_model) = (data[0], data[1], data[2])
+    (transcript, output_path, custom_model) = (lines[0], lines[1], lines[2])
 
     ref_path = ""
     pitch_options = "dra"
@@ -23,7 +23,7 @@ def handle_connection(connection, client_addr):
     pitch_factor = 0.0
 
     if(len(data) == 4):
-        ref_path = data[3]
+        ref_path = lines[3]
         pitch_options = ""
         if(not os.path.exists(ref_path)):
             print("Received a ref path that doesn't exist")

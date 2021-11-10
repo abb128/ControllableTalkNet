@@ -10,7 +10,6 @@ RUN python3.8 -m pip uninstall -y pesq
 RUN python3.8 -m pip install pesq==0.0.2
 RUN touch /talknet/is_docker
 WORKDIR /talknet
-EXPOSE 8050
 
 RUN printf "#!/bin/bash \
     \necho Updating TalkNet... \
