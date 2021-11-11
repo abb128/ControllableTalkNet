@@ -448,31 +448,58 @@ tnmodel, tnpath, tndurs, tnpitch = None, None, None, None
 hifigan, h, denoiser, hifipath = None, None, None, None
 
 
+model_cache = []
+
+def get_cached(spect, d, p):
+    global model_cache
+    for a in model_cache:
+        if(a[0] == spect) and (a[1] == d) and (a[2] == p):
+            return a[3]
+    
+    return None
+
+
+def cache(spect, d, p, val):
+    global model_cache
+    while(len(model_cache) >= 4):
+        model_cache.pop()
+    
+    model_cache.append([spect, d, p, val])
+
+
 def generate_audio(
-    custom_model,
+    custom_model_spect,
+    custom_model_dur,
+    custom_model_pitch,
     transcript,
-    pitch_options,
-    pitch_factor,
-    wav_name,
-    out_wav,
-    f0s,
-    f0s_wo_silence,
+    out_wav
 ):
-    global tnmodel, tnpath, tndurs, tnpitch, hifigan, h, denoiser, hifipath
+    global model_cache, tndurs, tnpitch, hifigan, h, denoiser, hifipath
 
     if transcript is None or transcript.strip() == "":
         return (False, "No transcript entered")
-    if wav_name is None and "dra" not in pitch_options:
-        return (False, "No reference audio selected")
     load_error, talknet_path, hifigan_path = download_model(
-        "Custom", custom_model
+        "Custom", custom_model_spect
+    )
+    if load_error is not None:
+        return (False, load_error)
+    
+    load_error, talknet_path_dur, hifigan_path_dur = download_model(
+        "Custom", custom_model_dur
+    )
+    if load_error is not None:
+        return (False, load_error)
+
+    load_error, talknet_path_pitch, hifigan_path_pitch = download_model(
+        "Custom", custom_model_pitch
     )
     if load_error is not None:
         return (False, load_error)
 
     try:
         with torch.no_grad():
-            if tnpath != talknet_path:
+            tnmodel = get_cached(custom_model_spect, custom_model_dur, custom_model_pitch)
+            if(tnmodel is None):
                 singer_path = os.path.join(
                     os.path.dirname(talknet_path), "TalkNetSinger.nemo"
                 )
@@ -481,10 +508,10 @@ def generate_audio(
                 else:
                     tnmodel = TalkNetSpectModel.restore_from(talknet_path)
                 durs_path = os.path.join(
-                    os.path.dirname(talknet_path), "TalkNetDurs.nemo"
+                    os.path.dirname(talknet_path_dur), "TalkNetDurs.nemo"
                 )
                 pitch_path = os.path.join(
-                    os.path.dirname(talknet_path), "TalkNetPitch.nemo"
+                    os.path.dirname(talknet_path_pitch), "TalkNetPitch.nemo"
                 )
                 if os.path.exists(durs_path):
                     tndurs = TalkNetDursModel.restore_from(durs_path)
@@ -495,33 +522,16 @@ def generate_audio(
                     tndurs = None
                     tnpitch = None
                 tnmodel.eval()
-                tnpath = talknet_path
+                cache(custom_model_spect, custom_model_dur, custom_model_pitch, tnmodel)
 
             token_list = arpa_parse(transcript, tnmodel)
             tokens = torch.IntTensor(token_list).view(1, -1).to(DEVICE)
             arpa = to_arpa(token_list)
 
-            if "dra" in pitch_options:
-                if tndurs is None or tnpitch is None:
-                    return (False, "Model doesn't support pitch prediction")
-                spect = tnmodel.generate_spectrogram(tokens=tokens)
-            else:
-                durs = get_duration(wav_name, transcript, token_list)
-
-                # Change pitch
-                if "pf" in pitch_options:
-                    f0_factor = np.power(np.e, (0.0577623 * float(pitch_factor)))
-                    f0s = [x * f0_factor for x in f0s]
-                    f0s_wo_silence = [x * f0_factor for x in f0s_wo_silence]
-
-                spect = tnmodel.force_spectrogram(
-                    tokens=tokens,
-                    durs=torch.from_numpy(durs)
-                    .view(1, -1)
-                    .type(torch.LongTensor)
-                    .to(DEVICE),
-                    f0=torch.FloatTensor(f0s).view(1, -1).to(DEVICE),
-                )
+            if tndurs is None or tnpitch is None:
+                return (False, "Model doesn't support pitch prediction")
+            
+            spect = tnmodel.generate_spectrogram(tokens=tokens)
 
             if hifipath != hifigan_path:
                 hifigan, h, denoiser = load_hifigan(hifigan_path, "config_v1")
@@ -530,37 +540,12 @@ def generate_audio(
             y_g_hat = hifigan(spect.float())
             audio = y_g_hat.squeeze()
             audio = audio * MAX_WAV_VALUE
-            audio_denoised = denoiser(audio.view(1, -1), strength=35)[:, 0]
+
+            # does this sound better or worse when denoised?
+            audio_denoised = denoiser(audio.view(1, -1), strength=30)[:, 0]
             audio_np = (
                 audio_denoised.detach().cpu().numpy().reshape(-1).astype(np.int16)
             )
-
-            # Auto-tuning
-            if "pc" in pitch_options and "dra" not in pitch_options:
-                _, output_freq, _, _ = crepe.predict(audio_np, 22050, viterbi=True)
-                output_pitch = torch.from_numpy(output_freq.astype(np.float32))
-                target_pitch = torch.FloatTensor(f0s_wo_silence)
-                factor = torch.mean(output_pitch) / torch.mean(target_pitch)
-
-                octaves = [0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
-                nearest_octave = min(octaves, key=lambda x: abs(x - factor))
-                target_pitch *= nearest_octave
-                if len(target_pitch) < len(output_pitch):
-                    target_pitch = torch.nn.functional.pad(
-                        target_pitch,
-                        (0, list(output_pitch.shape)[0] - list(target_pitch.shape)[0]),
-                        "constant",
-                        0,
-                    )
-                if len(target_pitch) > len(output_pitch):
-                    target_pitch = target_pitch[0 : list(output_pitch.shape)[0]]
-
-                audio_np = psola.vocode(
-                    audio_np, 22050, target_pitch=target_pitch
-                ).astype(np.float32)
-                normalize = (1.0 / np.max(np.abs(audio_np))) ** 0.9
-                audio_np = audio_np * normalize * MAX_WAV_VALUE
-                audio_np = audio_np.astype(np.int16)
 
             # Resample to 32k
             wave = resampy.resample(
@@ -589,7 +574,7 @@ def generate_audio(
             y_g_hat2 = hifigan_sr(new_mel)
             audio2 = y_g_hat2.squeeze()
             audio2 = audio2 * MAX_WAV_VALUE
-            audio2_denoised = denoiser(audio2.view(1, -1), strength=35)[:, 0]
+            audio2_denoised = denoiser(audio2.view(1, -1), strength=24)[:, 0]
 
             # High-pass filter, mixing and denormalizing
             audio2_denoised = audio2_denoised.detach().cpu().numpy().reshape(-1)
