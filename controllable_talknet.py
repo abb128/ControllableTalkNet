@@ -444,12 +444,8 @@ def download_model(model, custom_model):
         return (str(e), None, None)
 
 
-tnmodel, tnpath, tndurs, tnpitch = None, None, None, None
-hifigan, h, denoiser, hifipath = None, None, None, None
-
 
 model_cache = []
-
 def get_cached(spect, d, p):
     global model_cache
     for a in model_cache:
@@ -457,7 +453,6 @@ def get_cached(spect, d, p):
             return a[3]
     
     return None
-
 
 def cache(spect, d, p, val):
     global model_cache
@@ -467,6 +462,23 @@ def cache(spect, d, p, val):
     model_cache.append([spect, d, p, val])
 
 
+hifigan_cache = []
+def get_hifigan_cached(hifigan_path):
+    global hifigan_cache
+    for a in hifigan_cache:
+        if(a[0] == hifigan_path):
+            return a[1]
+    
+    while(len(hifigan_cache) >= 4):
+        hifigan_cache.pop()
+    
+    hifigan, h, denoiser = load_hifigan(hifigan_path, "config_v1")
+
+    hifigan_cache.push([hifigan_path, (hifigan, h, denoiser)])
+
+    return (hifigan, h, denoiser)
+
+
 def generate_audio(
     custom_model_spect,
     custom_model_dur,
@@ -474,31 +486,28 @@ def generate_audio(
     transcript,
     out_wav
 ):
-    global model_cache, tndurs, tnpitch, hifigan, h, denoiser, hifipath
+    global model_cache, hifigan_cache
 
     if transcript is None or transcript.strip() == "":
         return (False, "No transcript entered")
-    load_error, talknet_path, hifigan_path = download_model(
-        "Custom", custom_model_spect
-    )
+    
+    load_error, talknet_path, hifigan_path = download_model("Custom", custom_model_spect)
     if load_error is not None:
         return (False, load_error)
     
-    load_error, talknet_path_dur, hifigan_path_dur = download_model(
-        "Custom", custom_model_dur
-    )
+    load_error, talknet_path_dur, _ = download_model("Custom", custom_model_dur)
     if load_error is not None:
         return (False, load_error)
 
-    load_error, talknet_path_pitch, hifigan_path_pitch = download_model(
-        "Custom", custom_model_pitch
-    )
+    load_error, talknet_path_pitch, _ = download_model("Custom", custom_model_pitch)
     if load_error is not None:
         return (False, load_error)
 
     try:
         with torch.no_grad():
             tnmodel = get_cached(custom_model_spect, custom_model_dur, custom_model_pitch)
+            hifigan, h, denoiser = get_hifigan_cached(hifigan_path)
+
             if(tnmodel is None):
                 singer_path = os.path.join(
                     os.path.dirname(talknet_path), "TalkNetSinger.nemo"
@@ -513,17 +522,24 @@ def generate_audio(
                 pitch_path = os.path.join(
                     os.path.dirname(talknet_path_pitch), "TalkNetPitch.nemo"
                 )
+
                 if os.path.exists(durs_path):
                     tndurs = TalkNetDursModel.restore_from(durs_path)
                     tnmodel.add_module("_durs_model", tndurs)
+                else:
+                    return (False, "Model doesn't support duration prediction")
+                
+                if os.path.exists(pitch_path)
                     tnpitch = TalkNetPitchModel.restore_from(pitch_path)
                     tnmodel.add_module("_pitch_model", tnpitch)
                 else:
-                    tndurs = None
-                    tnpitch = None
+                    return (False, "Model doesn't support pitch prediction")
+                
                 tnmodel.eval()
-                cache(custom_model_spect, custom_model_dur, custom_model_pitch, tnmodel)
 
+
+                cache(custom_model_spect, custom_model_dur, custom_model_pitch, tnmodel)
+            
             token_list = arpa_parse(transcript, tnmodel)
             tokens = torch.IntTensor(token_list).view(1, -1).to(DEVICE)
             arpa = to_arpa(token_list)
@@ -532,10 +548,6 @@ def generate_audio(
                 return (False, "Model doesn't support pitch prediction")
             
             spect = tnmodel.generate_spectrogram(tokens=tokens)
-
-            if hifipath != hifigan_path:
-                hifigan, h, denoiser = load_hifigan(hifigan_path, "config_v1")
-                hifipath = hifigan_path
 
             y_g_hat = hifigan(spect.float())
             audio = y_g_hat.squeeze()
