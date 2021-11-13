@@ -545,9 +545,6 @@ def generate_audio(
             tokens = torch.IntTensor(token_list).view(1, -1).to(DEVICE)
             arpa = to_arpa(token_list)
 
-            if tndurs is None or tnpitch is None:
-                return (False, "Model doesn't support pitch prediction")
-            
             spect = tnmodel.generate_spectrogram(tokens=tokens)
 
             y_g_hat = hifigan(spect.float())
