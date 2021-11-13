@@ -10,9 +10,9 @@ def handle_connection(connection, client_addr):
     data = str(data, "utf-8")
 
     lines = data.split("\n")
-    if(len(lines) < 4):
+    if(len(lines) < 6):
         print("Received an invalid request")
-        return False
+        return "No, Invalid request"
     
 
     (transcript, output_path, s_model, d_model, p_model, fast_mode) \
@@ -22,9 +22,9 @@ def handle_connection(connection, client_addr):
     
     if(not succ):
         print("An error has occurred in audio generation:",err)
-        return False
+        return "No, " + err
     
-    return True
+    return "Yes"
 
 
 def run_server(host, port):
@@ -38,10 +38,7 @@ def run_server(host, port):
 
         success = handle_connection(connection, client_addr)
 
-        if(success):
-            connection.sendall(b"Yes")
-        else:
-            connection.sendall(b"No")
+        connection.sendall(bytes(success, "utf-8"))
         
         connection.close()
 

@@ -25,7 +25,7 @@ def send_request(transcript, out_path, s_model, d_model, p_model, fast_mode):
 
     client.send(bytes(request_str, "utf-8"))
 
-    resp = client.recv(1024)
+    resp = client.recv(4096)
 
     client.close()
 
