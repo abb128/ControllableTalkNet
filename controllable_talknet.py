@@ -474,7 +474,7 @@ def get_hifigan_cached(hifigan_path):
     
     hifigan, h, denoiser = load_hifigan(hifigan_path, "config_v1")
 
-    hifigan_cache.push([hifigan_path, (hifigan, h, denoiser)])
+    hifigan_cache.append([hifigan_path, (hifigan, h, denoiser)])
 
     return (hifigan, h, denoiser)
 
