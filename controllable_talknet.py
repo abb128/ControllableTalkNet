@@ -554,6 +554,7 @@ def generate_audio(
             audio = y_g_hat.squeeze()
             audio = audio * MAX_WAV_VALUE
 
+            audio_np = None
             if fast_mode:
                 audio_np = audio.cpu().numpy().astype(np.int16)
             else:
