@@ -457,7 +457,7 @@ def get_cached(spect, d, p):
 def cache(spect, d, p, val):
     global model_cache
     while(len(model_cache) >= 4):
-        model_cache.pop()
+        model_cache.pop(0)
     
     model_cache.append([spect, d, p, val])
 
@@ -470,7 +470,7 @@ def get_hifigan_cached(hifigan_path):
             return a[1]
     
     while(len(hifigan_cache) >= 4):
-        hifigan_cache.pop()
+        hifigan_cache.pop(0)
     
     hifigan, h, denoiser = load_hifigan(hifigan_path, "config_v1")
 
