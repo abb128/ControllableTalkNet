@@ -14,9 +14,10 @@ def handle_connection(connection, client_addr):
         print("Received an invalid request")
         return False
     
-    (transcript, output_path, s_model, d_model, p_model) = (lines[0], lines[1], lines[2], lines[3], lines[4])
+    (transcript, output_path, s_model, d_model, p_model, fast_mode) \
+        = (lines[0], lines[1], lines[2], lines[3], lines[4], bool(lines[5]))
 
-    (succ, err) = generate_audio(s_model, d_model, p_model, transcript, output_path)
+    (succ, err) = generate_audio(s_model, d_model, p_model, transcript, output_path, fast_mode)
     
     if(not succ):
         print("An error has occurred in audio generation:",err)

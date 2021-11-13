@@ -480,32 +480,33 @@ def get_hifigan_cached(hifigan_path):
 
 
 def generate_audio(
-    custom_model_spect,
-    custom_model_dur,
-    custom_model_pitch,
-    transcript,
-    out_wav
+    spect_model: str,
+    dur_model: str,
+    pitch_model: str,
+    transcript: str,
+    out_wav: str,
+    fast_mode: bool
 ):
     global model_cache, hifigan_cache
 
     if transcript is None or transcript.strip() == "":
         return (False, "No transcript entered")
     
-    load_error, talknet_path, hifigan_path = download_model("Custom", custom_model_spect)
+    load_error, talknet_path, hifigan_path = download_model("Custom", spect_model)
     if load_error is not None:
         return (False, load_error)
     
-    load_error, talknet_path_dur, _ = download_model("Custom", custom_model_dur)
+    load_error, talknet_path_dur, _ = download_model("Custom", dur_model)
     if load_error is not None:
         return (False, load_error)
 
-    load_error, talknet_path_pitch, _ = download_model("Custom", custom_model_pitch)
+    load_error, talknet_path_pitch, _ = download_model("Custom", pitch_model)
     if load_error is not None:
         return (False, load_error)
 
     try:
         with torch.no_grad():
-            tnmodel = get_cached(custom_model_spect, custom_model_dur, custom_model_pitch)
+            tnmodel = get_cached(spect_model, dur_model, pitch_model)
             hifigan, h, denoiser = get_hifigan_cached(hifigan_path)
 
             if(tnmodel is None):
@@ -529,7 +530,7 @@ def generate_audio(
                 else:
                     return (False, "Model doesn't support duration prediction")
                 
-                if os.path.exists(pitch_path)
+                if os.path.exists(pitch_path):
                     tnpitch = TalkNetPitchModel.restore_from(pitch_path)
                     tnmodel.add_module("_pitch_model", tnpitch)
                 else:
@@ -538,7 +539,7 @@ def generate_audio(
                 tnmodel.eval()
 
 
-                cache(custom_model_spect, custom_model_dur, custom_model_pitch, tnmodel)
+                cache(spect_model, dur_model, pitch_model, tnmodel)
             
             token_list = arpa_parse(transcript, tnmodel)
             tokens = torch.IntTensor(token_list).view(1, -1).to(DEVICE)
@@ -553,11 +554,13 @@ def generate_audio(
             audio = y_g_hat.squeeze()
             audio = audio * MAX_WAV_VALUE
 
-            # does this sound better or worse when denoised?
-            audio_denoised = denoiser(audio.view(1, -1), strength=30)[:, 0]
-            audio_np = (
-                audio_denoised.detach().cpu().numpy().reshape(-1).astype(np.int16)
-            )
+            if fast_mode:
+                audio_np = audio.cpu().numpy().astype(np.int16)
+            else:
+                audio_denoised = denoiser(audio.view(1, -1), strength=30)[:, 0]
+                audio_np = (
+                    audio_denoised.detach().cpu().numpy().reshape(-1).astype(np.int16)
+                )
 
             # Resample to 32k
             wave = resampy.resample(
@@ -586,7 +589,12 @@ def generate_audio(
             y_g_hat2 = hifigan_sr(new_mel)
             audio2 = y_g_hat2.squeeze()
             audio2 = audio2 * MAX_WAV_VALUE
-            audio2_denoised = denoiser(audio2.view(1, -1), strength=24)[:, 0]
+            
+            audio2_denoised = None
+            if fast_mode:
+                audio2_denoised = audio2
+            else:
+                audio2_denoised = denoiser(audio2.view(1, -1), strength=24)[:, 0]
 
             # High-pass filter, mixing and denormalizing
             audio2_denoised = audio2_denoised.detach().cpu().numpy().reshape(-1)
